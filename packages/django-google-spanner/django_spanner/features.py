@@ -1524,8 +1524,6 @@ class DatabaseFeatures(BaseDatabaseFeatures):
             "model_fields.test_jsonfield.TestSerialization.test_xml_serialization",
             "model_fields.test_jsonfield.TestSerialization.test_xml_serialization",
             "model_fields.test_jsonfield.TestSerialization.test_xml_serialization",
-            "model_fields.test_jsonfield.TestQuerying.test_deep_negative_lookup_array",
-            "model_fields.test_jsonfield.TestQuerying.test_deep_negative_lookup_mixed",
             "model_fields.test_jsonfield.TestQuerying.test_deep_values",
             "model_fields.test_jsonfield.TestQuerying.test_expression_wrapper_key_transform",
             "model_fields.test_jsonfield.TestQuerying.test_has_key_literal_lookup",
@@ -1536,7 +1534,6 @@ class DatabaseFeatures(BaseDatabaseFeatures):
             "model_fields.test_jsonfield.TestQuerying.test_lookups_special_chars",
             "model_fields.test_jsonfield.TestQuerying.test_lookups_special_chars_double_quotes",
             "model_fields.test_jsonfield.TestQuerying.test_nested_key_transform_raw_expression",
-            "model_fields.test_jsonfield.TestQuerying.test_shallow_list_negative_lookup",
             "model_fields.test_uuid.TestSerialization.test_dumping",
             "queries.test_bulk_update.BulkUpdateNoteTests.test_unsaved_models",
             "queries.test_bulk_update.BulkUpdateTests.test_json_field_sql_null",
@@ -2329,6 +2326,10 @@ class DatabaseFeatures(BaseDatabaseFeatures):
         "bulk_create.tests.BulkCreateTransactionTests.test_objs_with_and_without_pk",
         # Tie-breaker ordering on pk assumes sequential integer IDs; Spanner uses random IDs.
         "ordering.tests.OrderingTests.test_order_by_case_when_constant_value",
+        # Spanner GoogleSQL JSONPath does not support negative array indices (e.g. $[-1]).
+        "model_fields.test_jsonfield.TestQuerying.test_deep_negative_lookup_array",
+        "model_fields.test_jsonfield.TestQuerying.test_deep_negative_lookup_mixed",
+        "model_fields.test_jsonfield.TestQuerying.test_shallow_list_negative_lookup",
     )
 
     if django.VERSION >= (6, 0):
