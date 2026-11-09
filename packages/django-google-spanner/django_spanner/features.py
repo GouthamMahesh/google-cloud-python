@@ -2306,6 +2306,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
 
     django_6_0_skip_tests = (
         # Spanner uses random int64 IDs; test assumes monotonic ordering matching insertion order.
+        "prefetch_related.tests.PrefetchRelatedMTICacheTests.test_grandparent_m2m_available_in_child",
         "prefetch_related.tests.PrefetchRelatedMTICacheTests.test_parent_m2m_available_in_child",
         # Client-side AutoField ID generation sets pk before save; _is_pk_set() triggers refresh_from_db instead of AttributeError.
         "defer_regress.tests.DeferCopyInstanceTests.test_bulk_create",
