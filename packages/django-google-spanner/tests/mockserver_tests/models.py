@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 
 
@@ -21,4 +22,4 @@ class Singer(models.Model):
 
 
 class Detail(models.Model):
-    value = models.JSONField(null=True)
+    value = models.JSONField(null=True, encoder=DjangoJSONEncoder)

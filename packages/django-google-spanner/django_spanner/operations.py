@@ -4,6 +4,7 @@
 # license that can be found in the LICENSE file or at
 # https://developers.google.com/open-source/licenses/bsd
 
+import json
 import os
 import re
 from base64 import b64decode
@@ -12,37 +13,43 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db.backends.base.operations import BaseDatabaseOperations
+from django.db.models.fields.json import JSONField
 from django.db.utils import DatabaseError
 from django.utils import timezone
 from django.utils.duration import duration_microseconds
 from google.cloud.spanner_dbapi.parse_utils import (
+    TYPES_MAP,
     DateStr,
     TimestampStr,
     escape_name,
 )
-from google.cloud.spanner_v1 import JsonObject
+from google.cloud.spanner_v1 import JsonObject, param_types
 
 
-def _unwrap_json_object(value):
-    """Recursively unwrap JsonObject instances before json.dumps serialization."""
-    val_type = type(value)
-    if val_type is dict:
-        return {k: _unwrap_json_object(v) for k, v in value.items()}
-    if val_type is list:
-        return [_unwrap_json_object(item) for item in value]
-    if isinstance(value, JsonObject):
-        if value._is_null:
-            return None
-        if value._is_array:
-            return [_unwrap_json_object(item) for item in value._array_value]
-        if value._is_scalar_value:
-            return value._simple_value
-        return {k: _unwrap_json_object(v) for k, v in value.items()}
-    if isinstance(value, dict):
-        return {k: _unwrap_json_object(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_unwrap_json_object(item) for item in value]
-    return value
+class _JsonString(JsonObject):
+    """Wrap a pre-serialized JSON string for spanner_dbapi without re-parsing."""
+
+    def __init__(self, raw_json):
+        self._is_null = False
+        self._is_array = False
+        self._is_scalar_value = False
+        self._raw_json = raw_json
+
+    def serialize(self):
+        return self._raw_json
+
+    def __repr__(self):
+        return f"_JsonString({self._raw_json!r})"
+
+    def __eq__(self, other):
+        if isinstance(other, _JsonString):
+            return self._raw_json == other._raw_json
+        if isinstance(other, JsonObject):
+            return self._raw_json == other.serialize()
+        return False
+
+
+TYPES_MAP[_JsonString] = param_types.JSON
 
 
 class DatabaseOperations(BaseDatabaseOperations):
@@ -315,23 +322,11 @@ class DatabaseOperations(BaseDatabaseOperations):
         )
 
     def adapt_json_value(self, value, encoder):
-        """Adapt a JSON value into a Spanner JsonObject for parameter binding.
-
-        Note that JSON null (`Value(None, JSONField())`) maps to a null
-        JsonObject whose `serialize()` returns `None` (bound as SQL NULL by
-        `spanner_v1`).
-
-        :type value: object
-        :param value: A Python value to serialize as JSON.
-
-        :type encoder: :class:`json.JSONEncoder` or None
-        :param encoder: Custom JSON encoder class, if configured on the field.
-
-        :rtype: :class:`~google.cloud.spanner_v1.JsonObject`
-        :returns: A Spanner JsonObject wrapping the serialized JSON payload.
-        """
-        value = _unwrap_json_object(value)
-        return JsonObject.from_str(super().adapt_json_value(value, encoder))
+        """Wrap Django's serialized JSON string for Spanner JSON parameter binding."""
+        raw_json = super().adapt_json_value(value, encoder)
+        if raw_json is None:
+            return None
+        return _JsonString(raw_json)
 
     def get_db_converters(self, expression):
         """Get a list of functions needed to convert field data.
@@ -451,23 +446,32 @@ class DatabaseOperations(BaseDatabaseOperations):
         return value
 
     def convert_jsonfield_value(self, value, expression, connection):
-        """Convert Spanner JSONField value into a JSON string for Django.
-
-        :type value: :class:`~google.cloud.spanner_v1.JsonObject` or str or None
-        :param value: A JSON field value returned by Spanner.
-
-        :type expression: :class:`django.db.models.expressions.BaseExpression`
-        :param expression: A query expression.
-
-        :type connection: :class:`~google.cloud.spanner_dbapi.connection.Connection`
-        :param connection: Reference to a Spanner database connection.
-
-        :rtype: str or None
-        :returns: A serialized JSON string for Django's JSONField.from_db_value,
-                  or None.
-        """
+        """Convert Spanner JsonObject received from DB to a Python value for Django."""
+        if value is None:
+            return None
+        output_field = getattr(expression, "output_field", None)
+        has_custom_from_db_value = (
+            isinstance(output_field, JSONField)
+            and type(output_field).from_db_value is not JSONField.from_db_value
+        )
+        decoder = getattr(output_field, "decoder", None)
         if isinstance(value, JsonObject):
-            return value.serialize()
+            if value._is_null:
+                return None
+            if has_custom_from_db_value:
+                return value.serialize()
+            if decoder is not None:
+                return json.loads(value.serialize(), cls=decoder)
+            if value._is_array:
+                return value._array_value
+            if value._is_scalar_value:
+                return value._simple_value
+            return dict(value)
+        if isinstance(value, str) and not has_custom_from_db_value:
+            try:
+                return json.loads(value, cls=decoder)
+            except json.JSONDecodeError:
+                return value
         return value
 
     def date_extract_sql(self, lookup_type, field_name, params=None):
